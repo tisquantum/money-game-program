@@ -68,6 +68,29 @@ impl<'info> Hands<'info> {
             }
         }
     }
+
+    /// Gives each seat that moved in `turn` its own result, readable only by
+    /// that seat: what it won and whether it won the round. Nothing until the
+    /// round has resolved (a parked raffle waits for its draw).
+    pub fn show_results(&mut self, rec: &Record, turn: u8) {
+        let r = &rec.rounds[turn as usize];
+        if r.stamp != turn + 1 {
+            return;
+        }
+        let hands = [
+            &mut self.hand0,
+            &mut self.hand1,
+            &mut self.hand2,
+            &mut self.hand3,
+            &mut self.hand4,
+        ];
+        for (i, h) in hands.into_iter().enumerate() {
+            let moved = r.mask & (1 << i) != 0;
+            h.result_stamp = r.stamp;
+            h.result = if moved { r.delta[i] } else { 0 };
+            h.result_won = moved && r.winner as usize == i;
+        }
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -433,8 +456,10 @@ pub fn tick(ctx: Context<Tick>) -> Result<()> {
     );
     let moves = ctx.accounts.hands.moves(game)?;
     let rec = &mut ctx.accounts.record;
+    let from = game.turn;
     game.resolve_turn(rec, &moves, t);
     ctx.accounts.hands.show_supplies(rec);
+    ctx.accounts.hands.show_results(rec, from);
     Ok(())
 }
 
@@ -494,7 +519,9 @@ pub fn apply_draw(ctx: Context<ApplyDraw>) -> Result<()> {
     let registry = ctx.accounts.registry.load()?;
     let t = Clock::get()?.unix_timestamp;
     let rec = &mut ctx.accounts.record;
+    let from = game.turn;
     game.apply_randomness(rec, &draw.randomness, &moves, registry.active(), t);
+    ctx.accounts.hands.show_results(rec, from);
     Ok(())
 }
 

@@ -165,3 +165,7 @@ pub const EV_FINISHED: u8 = 16;
 /// A seat's money for a mini-game, made public once its last round is over
 /// (`other` is the mini-game's turn kind). The Deal's split is posted the same way.
 pub const EV_TOTAL: u8 = 17;
+/// That a round paid out, without saying to whom: `other` is the turn kind and
+/// `amount` how many seats won (Raffle and Signal: 0 or 1; Prize Case: the
+/// cases taken alone). Who won, and what, stays in the record and the winner's hand.
+pub const EV_ROUND_WON: u8 = 18;

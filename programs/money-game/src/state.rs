@@ -172,6 +172,12 @@ pub struct Hand {
     /// This seat's Money Makers supply, copied from the `Record` so only the
     /// seat's wallet can see it.
     pub supply: u32,
+    /// `turn + 1` of the last round resolved for this seat (0 = none yet).
+    pub result_stamp: u8,
+    /// Points this seat won (or lost) in that round, from the `Record`.
+    pub result: i32,
+    /// This seat was that round's winner.
+    pub result_won: bool,
 }
 
 /// One resolved turn, sealed until the game is committed to the base layer.

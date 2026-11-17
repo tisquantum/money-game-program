@@ -199,6 +199,9 @@ pub fn start_game(ctx: Context<StartGame>) -> Result<()> {
         hand.touched_ts = 0;
         hand.touched_stamp = 0;
         hand.supply = 0;
+        hand.result_stamp = 0;
+        hand.result = 0;
+        hand.result_won = false;
     }
     system_transfer(
         sp,

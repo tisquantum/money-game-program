@@ -307,6 +307,7 @@ impl Game {
         let total = Self::raffle_tickets(moves);
         if total == 0 {
             self.seal(rec, moves, NO_SEAT, 0);
+            self.push_log(EV_ROUND_WON, NO_SEAT, K_RAFFLE, 0);
             return;
         }
         let mut pick = rng.below(total);
@@ -322,6 +323,7 @@ impl Game {
         let prize = (round_pool(round) as u64 / total) as i32;
         self.earn(rec, winner, prize);
         self.seal(rec, moves, winner as u8, prize);
+        self.push_log(EV_ROUND_WON, NO_SEAT, K_RAFFLE, 1);
         if round == 2 {
             self.seats[winner].medals += 1;
             self.push_log(EV_MEDAL, winner as u8, NO_SEAT, 1);
@@ -342,12 +344,16 @@ impl Game {
                 let payout = (n as u32 * (round_pool(round) / 5)) as i32;
                 self.earn(rec, winner, payout);
                 self.seal(rec, moves, winner as u8, payout);
+                self.push_log(EV_ROUND_WON, NO_SEAT, K_SIGNAL, 1);
                 if round == 2 {
                     self.seats[winner].medals += 1;
                     self.push_log(EV_MEDAL, winner as u8, NO_SEAT, 1);
                 }
             }
-            None => self.seal(rec, moves, NO_SEAT, 0),
+            None => {
+                self.seal(rec, moves, NO_SEAT, 0);
+                self.push_log(EV_ROUND_WON, NO_SEAT, K_SIGNAL, 0);
+            }
         }
     }
 
@@ -413,12 +419,14 @@ impl Game {
         for v in moves.iter().flatten() {
             counts[*v as usize] += 1;
         }
+        let mut taken = 0;
         for (i, m) in moves.iter().enumerate() {
             let Some(case) = m else { continue };
             let case = *case as usize;
             if counts[case] != 1 {
                 continue;
             }
+            taken += 1;
             if self.prize_medal_mask & (1 << case) != 0 {
                 self.seats[i].medals += 1;
                 self.push_log(EV_MEDAL, i as u8, case as u8, 1);
@@ -433,6 +441,7 @@ impl Game {
             self.prize_boost_next = true;
         }
         self.seal(rec, moves, NO_SEAT, all_unique as i32);
+        self.push_log(EV_ROUND_WON, NO_SEAT, K_PRIZE_CASE, taken);
     }
 
     /// Most medals deals; ties go to the higher balance, then the lower seat.
@@ -746,6 +755,7 @@ impl Ledger {
                 s.balance = add_signed(s.balance, e.amount);
                 self.push(e.turn, EV_TOTAL, e.seat, e.other, e.amount);
             }
+            EV_ROUND_WON => self.push(e.turn, EV_ROUND_WON, NO_SEAT, e.other, e.amount),
             EV_FINISHED => {
                 self.finished = true;
                 self.window = 0;
@@ -985,6 +995,18 @@ mod tests {
         assert_eq!(g.reveal.values, [0; SEATS], "the public reveal only says who moved");
         assert_eq!(g.reveal.winner, NO_SEAT);
         assert_eq!(g.reveal.mask, 0b1_1111);
+        let won = logged(&g, EV_ROUND_WON);
+        assert_eq!(won.len(), 1, "that a ticket was drawn is public");
+        assert_eq!((won[0].seat, won[0].other, won[0].amount), (NO_SEAT, K_RAFFLE, 1), "but not whose");
+    }
+
+    #[test]
+    fn a_raffle_nobody_entered_says_so() {
+        let (mut g, mut rec) = seated_game();
+        act_all(&mut g);
+        g.resolve_turn(&mut rec, &[Some(0); SEATS], 1_100);
+        let won = logged(&g, EV_ROUND_WON);
+        assert_eq!((won.len(), won[0].amount), (1, 0));
     }
 
     #[test]
@@ -999,6 +1021,13 @@ mod tests {
         assert_eq!(rec.rounds[4].winner, 2);
         assert_eq!(g.seats[2].balance, 0);
         assert!(logged(&g, EV_TOTAL).is_empty());
+        let won = logged(&g, EV_ROUND_WON);
+        assert_eq!((won.len(), won[0].seat, won[0].other, won[0].amount), (1, NO_SEAT, K_SIGNAL, 1));
+        let l = relayed_ledger(&g);
+        assert!(
+            l.log[..l.log_seq as usize].iter().any(|e| e.kind == EV_ROUND_WON && e.seat == NO_SEAT),
+            "the public ER carries the signal"
+        );
     }
 
     #[test]
