@@ -233,8 +233,10 @@ impl Game {
         self.push_log_at(turn, EV_TOTAL, i as u8, kind, amount);
     }
 
-    /// Files a round's moves and outcome in the record. The public reveal only
-    /// says which seats moved.
+    /// Files a round's moves and outcome in the record. Signal and Prize Case
+    /// picks go public once the round resolves; Money Makers shows only the
+    /// share every seat got back; a Raffle or a deal vote only says who moved.
+    /// Winnings stay in the record until the mini-game's totals either way.
     fn seal(&mut self, rec: &mut Record, moves: &Moves, winner: u8, amount: i32) {
         let mut mask = 0u8;
         let mut values = [0u32; SEATS];
@@ -250,12 +252,14 @@ impl Game {
         r.values = values;
         r.winner = winner;
         r.amount = amount;
+        let kind = self.kind();
+        let picks = matches!(kind, K_SIGNAL | K_PRIZE_CASE);
         self.reveal = Reveal {
             turn: self.stamp(),
             mask,
-            values: [0; SEATS],
-            winner: NO_SEAT,
-            amount: 0,
+            values: if picks { values } else { [0; SEATS] },
+            winner: if picks { winner } else { NO_SEAT },
+            amount: if picks || kind == K_MONEY_MAKERS { amount } else { 0 },
         };
     }
 
@@ -1010,7 +1014,7 @@ mod tests {
     }
 
     #[test]
-    fn signal_lowest_unique_wins_in_secret() {
+    fn signal_reveals_every_pick_but_pays_with_the_totals() {
         let (mut g, mut rec) = seated_game();
         g.turn = 4;
         act_all(&mut g);
@@ -1019,6 +1023,9 @@ mod tests {
         assert_eq!(rec.earned[2], (3 * round_pool(0) / 5) as i32);
         assert_eq!(rec.rounds[4].delta[2], (3 * round_pool(0) / 5) as i32);
         assert_eq!(rec.rounds[4].winner, 2);
+        assert_eq!(g.reveal.values, [1, 1, 3, 2, 2], "who picked what is public once it resolves");
+        assert_eq!(g.reveal.winner, 2);
+        assert_eq!(g.reveal.amount, (3 * round_pool(0) / 5) as i32);
         assert_eq!(g.seats[2].balance, 0);
         assert!(logged(&g, EV_TOTAL).is_empty());
         let won = logged(&g, EV_ROUND_WON);
@@ -1069,6 +1076,8 @@ mod tests {
             act_all(&mut g);
             let moves: Moves = core::array::from_fn(|i| Some(rec.mm_supply[i]));
             g.resolve_turn(&mut rec, &moves, 3_000 + r);
+            assert_eq!(g.reveal.values, [0; SEATS], "who put in what stays sealed");
+            assert_eq!(g.reveal.amount, rec.rounds[g.reveal.turn as usize - 1].amount, "the equal share is public");
         }
         let paid: u32 = g.seats.iter().map(|s| s.balance).sum();
         assert!(paid <= MINIGAME_POINTS, "paid {paid}");
@@ -1084,6 +1093,7 @@ mod tests {
         assert_eq!(g.prize_board[0], 250, "round one opens boosted");
         act_all(&mut g);
         g.resolve_turn(&mut rec, &[Some(0), Some(1), Some(2), Some(3), Some(4)], 4_000);
+        assert_eq!(g.reveal.values, [0, 1, 2, 3, 4], "who opened which case is public");
         assert_eq!(rec.earned[0], 250);
         assert_eq!(g.seats[4].medals, 1, "medal cases are public at once");
         assert_eq!(g.prize_board[0], 250, "round two boosted after a perfect spread");
